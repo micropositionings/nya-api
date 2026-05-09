@@ -644,7 +644,7 @@
   </div>
 
   <script>
-    const API_BASE = 'http://localhost:3000'; // Update this when deployed
+    const API_BASE = 'https://nya-api.onrender.com'; // Change to http://localhost:3000 for local dev
 
     const categoryInfo = {
       movies: { title: 'Movies', tag: 'Cinema' },
@@ -688,11 +688,11 @@
         }
 
         let html = '<div class="search-results">';
-        data.results.forEach((anime, idx) => {
+        data.results.slice(0, 20).forEach((anime) => {
           html += `
-            <div class="result-item" onclick="selectAnime('${anime.id}', '${anime.name.replace(/'/g, "\\'")}', ${anime.episodes})">
+            <div class="result-item" onclick="selectAnime(${anime.id}, '${anime.name.replace(/'/g, "\\'")}', ${anime.episodes})">
               <div class="result-item-title">${anime.name}</div>
-              <div class="result-item-meta">${anime.episodes} episodes</div>
+              <div class="result-item-meta">${anime.episodes} episodes • Score: ${anime.score}</div>
             </div>
           `;
         });
@@ -706,30 +706,37 @@
     async function selectAnime(id, name, episodeCount) {
       currentAnime = { id, name, episodeCount };
       const content = document.getElementById('aniwatchContent');
-      content.innerHTML = '<div class="loading">Loading episodes...</div>';
+      content.innerHTML = '<div class="loading">Loading anime...</div>';
 
       try {
-        const response = await fetch(`${API_BASE}/api/episodes/${id}`);
+        const response = await fetch(`${API_BASE}/api/anime/${id}`);
         const data = await response.json();
-        currentEpisodes = data.episodes;
+
+        const response2 = await fetch(`${API_BASE}/api/episodes/${id}`);
+        const epData = response2.json();
+        currentEpisodes = epData.episodes || [];
 
         let html = `
           <div class="anime-detail">
-            <img class="anime-poster" src="https://via.placeholder.com/200x300?text=${encodeURIComponent(name)}&bg=1a1a1a" alt="${name}" />
+            <img class="anime-poster" src="${data.cover}" alt="${name}" onerror="this.src='https://via.placeholder.com/200x300?text=${encodeURIComponent(name)}&bg=1a1a1a'" />
             <div class="anime-info">
-              <h3>${name}</h3>
+              <h3>${data.name}</h3>
               <div class="anime-info-meta">
-                <div><strong>Episodes:</strong> ${episodeCount}</div>
-                <div style="margin-top: 12px; color: #999; font-size: 12px;">Select an episode to view streaming sources.</div>
+                <div><strong>Episodes:</strong> ${data.episodes}</div>
+                <div><strong>Status:</strong> ${data.status || 'Unknown'}</div>
+                <div><strong>Score:</strong> ⭐ ${data.score || 'N/A'}</div>
+                <div style="margin-top: 12px; color: #999; font-size: 12px;">${data.synopsis.substring(0, 200)}...</div>
+                <div style="margin-top: 12px; color: #999; font-size: 12px;"><strong>Aired:</strong> ${data.aired}</div>
               </div>
               
               <div class="episode-selector">
                 <label for="episodeSelect">Select Episode</label>
-                <select class="episode-select" id="episodeSelect" onchange="getEpisodeLinks()">
+                <select class="episode-select" id="episodeSelect" onchange="getWatchLinks()">
                   <option value="">-- Choose Episode --</option>
         `;
 
-        currentEpisodes.forEach(ep => {
+        const episodes = Array.from({ length: data.episodes || 1 }, (_, i) => i + 1);
+        episodes.forEach(ep => {
           html += `<option value="${ep}">Episode ${ep}</option>`;
         });
 
@@ -738,7 +745,7 @@
               </div>
 
               <div class="stream-sources" id="streamSources" style="display:none;">
-                <label>Streaming Sources</label>
+                <label>Where to Watch</label>
                 <div id="sourcesList"></div>
               </div>
             </div>
@@ -747,25 +754,25 @@
 
         content.innerHTML = html;
       } catch (err) {
-        content.innerHTML = `<div class="error">Error loading episodes: ${err.message}</div>`;
+        content.innerHTML = `<div class="error">Error loading anime: ${err.message}</div>`;
       }
     }
 
-    async function getEpisodeLinks() {
+    async function getWatchLinks() {
       const ep = document.getElementById('episodeSelect').value;
       if (!ep || !currentAnime) return;
 
       const sourcesList = document.getElementById('sourcesList');
-      sourcesList.innerHTML = '<div class="loading">Loading sources...</div>';
+      sourcesList.innerHTML = '<div class="loading">Getting watch links...</div>';
       document.getElementById('streamSources').style.display = 'block';
 
       try {
-        const response = await fetch(`${API_BASE}/api/episode/${currentAnime.id}/${ep}`);
+        const response = await fetch(`${API_BASE}/api/watch/${currentAnime.id}/${ep}`);
         const data = await response.json();
 
         let html = '';
         if (data.links && data.links.length > 0) {
-          data.links.forEach((link, idx) => {
+          data.links.forEach((link) => {
             html += `
               <a class="source-link" href="${link.url}" target="_blank" rel="noopener">
                 ${link.source} → Open
@@ -773,7 +780,7 @@
             `;
           });
         } else {
-          html = '<div class="error">No streaming sources available for this episode.</div>';
+          html = '<div class="error">No watch links available.</div>';
         }
         sourcesList.innerHTML = html;
       } catch (err) {

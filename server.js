@@ -10,217 +10,162 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
-});
+// Jikan API (MyAnimeList) - most reliable
+const JIKAN_API = 'https://api.jikan.moe/v4';
 
-// AllAnime API Configuration
-const ALLANIME_API = 'https://api.allanime.day';
-const ANILIST_API = 'https://graphql.anilist.co';
-const ALLANIME_REFR = 'https://allanime.to';
-const AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0';
+console.log(`🎬 Anime Web Server starting...`);
 
-// Create axios instance with retry logic
-const axiosInstance = axios.create({
-  timeout: 15000,
-  headers: {
-    'User-Agent': AGENT,
-    'Accept': 'application/json',
-    'Accept-Encoding': 'gzip, deflate',
-    'Accept-Language': 'en-US,en;q=0.9'
-  }
-});
-
-// Decrypt tobeparsed function (from ani-cli)
-function b64urlToHex(str) {
-  let len = str.length;
-  let mod = len % 4;
-  let pad = '';
-  if (mod === 2) pad = '==';
-  else if (mod === 3) pad = '=';
-  
-  const base64 = (str + pad).replace(/-/g, '+').replace(/_/g, '/');
-  return Buffer.from(base64, 'base64').toString('hex');
-}
-
-// Search anime using AniList API
+// Search anime
 app.get('/api/search', async (req, res) => {
   try {
     const query = req.query.q;
     if (!query) return res.status(400).json({ error: 'Query required' });
 
-    console.log(`[SEARCH] Searching for: ${query}`);
+    console.log(`[SEARCH] ${query}`);
 
-    const anilistQuery = `
-      query ($search: String) {
-        Page(perPage: 40) {
-          media(search: $search, type: ANIME) {
-            id
-            title {
-              romaji
-              english
-            }
-            episodes
-            coverImage {
-              large
-            }
-          }
-        }
-      }
-    `;
-
-    const response = await axiosInstance.post(ANILIST_API, {
-      query: anilistQuery,
-      variables: { search: query }
-    }, {
-      headers: {
-        'Content-Type': 'application/json'
+    const response = await axios.get(`${JIKAN_API}/anime`, {
+      params: {
+        query: query,
+        limit: 25,
+        status: 'complete,ongoing'
       }
     });
 
-    console.log(`[SEARCH] Response received`);
-
-    let results = [];
-    
-    if (response.data?.data?.Page?.media) {
-      results = response.data.data.Page.media.map(item => ({
-        id: item.id.toString(),
-        name: item.title.romaji || item.title.english || 'Unknown',
-        episodes: item.episodes || 0,
-        cover: item.coverImage?.large
-      }));
-    }
-
-    console.log(`[SEARCH] Found ${results.length} results`);
+    const results = response.data.data.map(anime => ({
+      id: anime.mal_id,
+      name: anime.title,
+      episodes: anime.episodes || 0,
+      score: anime.score || 0,
+      cover: anime.images.jpg.large_image_url
+    }));
 
     res.json({ results });
   } catch (error) {
     console.error('[SEARCH] Error:', error.message);
-    console.error('[SEARCH] Response data:', error.response?.data);
     res.status(500).json({ error: 'Search failed', results: [] });
   }
 });
 
-// Get anime details - get cover and title from AniList
+// Get anime details
 app.get('/api/anime/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const anilistQuery = `
-      query ($id: Int) {
-        Media(id: $id, type: ANIME) {
-          id
-          title {
-            romaji
-            english
-          }
-          coverImage {
-            large
-          }
-          episodes
-        }
-      }
-    `;
+    const response = await axios.get(`${JIKAN_API}/anime/${id}`);
+    const anime = response.data.data;
 
-    const response = await axiosInstance.post(ANILIST_API, {
-      query: anilistQuery,
-      variables: { id: parseInt(id) }
+    res.json({
+      id: anime.mal_id,
+      name: anime.title,
+      episodes: anime.episodes || 0,
+      cover: anime.images.jpg.large_image_url,
+      synopsis: anime.synopsis || '',
+      score: anime.score || 0,
+      status: anime.status,
+      aired: anime.aired?.string || 'Unknown'
     });
-
-    if (response.data?.data?.Media) {
-      const media = response.data.data.Media;
-      return res.json({
-        id: media.id,
-        name: media.title.romaji || media.title.english || 'Anime',
-        cover: media.coverImage?.large || `https://via.placeholder.com/300x450?text=Anime&bg=1a1a1a`,
-        episodes: media.episodes || 0
-      });
-    }
-
-    res.status(404).json({ error: 'Anime not found' });
   } catch (error) {
     console.error('[ANIME] Error:', error.message);
     res.status(500).json({ error: 'Failed to get anime details' });
   }
 });
 
-// Get episodes list using AniList
+// Get episodes (generate list based on total)
 app.get('/api/episodes/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    console.log(`[EPISODES] Getting episodes for: ${id}`);
 
-    const anilistQuery = `
-      query ($id: Int) {
-        Media(id: $id, type: ANIME) {
-          id
-          episodes
-          title {
-            romaji
-          }
-        }
-      }
-    `;
+    const response = await axios.get(`${JIKAN_API}/anime/${id}`);
+    const totalEpisodes = response.data.data.episodes || 1;
 
-    const response = await axiosInstance.post(ANILIST_API, {
-      query: anilistQuery,
-      variables: { id: parseInt(id) }
-    });
+    // Generate episode array
+    const episodes = Array.from({ length: totalEpisodes }, (_, i) => i + 1);
 
-    let episodes = [];
-
-    if (response.data?.data?.Media?.episodes) {
-      const totalEps = response.data.data.Media.episodes;
-      // Generate array of episode numbers from 1 to totalEps
-      episodes = Array.from({length: totalEps}, (_, i) => i + 1);
-    }
-
-    console.log(`[EPISODES] Found ${episodes.length} episodes`);
-
-    res.json({ episodes: episodes.length > 0 ? episodes : ['1'] });
+    res.json({ episodes });
   } catch (error) {
     console.error('[EPISODES] Error:', error.message);
     res.status(500).json({ error: 'Failed to get episodes', episodes: ['1'] });
   }
 });
 
-// Get episode streaming links
+// Get episode info
 app.get('/api/episode/:id/:ep', async (req, res) => {
   try {
     const { id, ep } = req.params;
-    console.log(`[EPISODE] Getting links for AniList ID ${id} ep ${ep}`);
 
-    // For now, return placeholder links
-    // In production, you would map AniList IDs to AllAnime IDs and fetch real streams
-    const links = [
-      {
-        source: 'Jikan (Meta)',
-        url: '#'
-      },
-      {
-        source: 'Find on AllAnime',
-        url: `https://allanime.to/search?keyw=${encodeURIComponent(id)}`
-      }
-    ];
+    const response = await axios.get(`${JIKAN_API}/anime/${id}/episodes/${ep}`);
+    const episode = response.data.data;
 
-    console.log(`[EPISODE] Returning ${links.length} links`);
-
-    res.json({ 
+    res.json({
       episode: ep,
-      links: links,
-      note: 'Real streaming links require AniList to AllAnime ID mapping'
+      title: episode.title || `Episode ${ep}`,
+      aired: episode.aired || 'Unknown',
+      score: episode.score || 0,
+      filler: episode.filler || false,
+      recap: episode.recap || false
     });
   } catch (error) {
     console.error('[EPISODE] Error:', error.message);
     res.status(500).json({ 
-      error: 'Failed to get episode links',
-      links: []
+      episode: ep,
+      title: `Episode ${ep}`,
+      note: 'Episode details not available'
     });
   }
 });
 
+// Search streaming sites (returns links to watch)
+app.get('/api/watch/:id/:ep', async (req, res) => {
+  try {
+    const { id, ep } = req.params;
+
+    // Get anime info for search
+    const animeRes = await axios.get(`${JIKAN_API}/anime/${id}`);
+    const anime = animeRes.data.data;
+    const title = anime.title.replace(/[^a-zA-Z0-9\s]/g, '').trim();
+
+    // Return links to popular anime streaming sites
+    const links = [
+      {
+        source: 'Search on 9anime',
+        url: `https://9anime.id/search?keyword=${encodeURIComponent(title)}`
+      },
+      {
+        source: 'Search on AnimixPlay',
+        url: `https://animixplay.to/?q=${encodeURIComponent(title)}`
+      },
+      {
+        source: 'MAL Link',
+        url: `https://myanimelist.net/anime/${id}`
+      },
+      {
+        source: 'AniList',
+        url: `https://anilist.co/search/anime?search=${encodeURIComponent(title)}`
+      }
+    ];
+
+    res.json({ 
+      episode: ep,
+      anime: title,
+      links,
+      note: 'Visit any of these sites and search for the anime to watch'
+    });
+  } catch (error) {
+    console.error('[WATCH] Error:', error.message);
+    res.status(500).json({ error: 'Failed to get watch links' });
+  }
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    service: 'Anime Web Server',
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.listen(PORT, () => {
-  console.log(`🎬 Ani-CLI API Server running on http://localhost:${PORT}`);
-  console.log(`📺 Anime search available at http://localhost:${PORT}/api/search?q=naruto`);
+  console.log(`✅ Server running at http://localhost:${PORT}`);
+  console.log(`🔍 Try: http://localhost:${PORT}/api/search?q=naruto`);
 });
