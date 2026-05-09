@@ -17,7 +17,7 @@ app.get('/api/health', (req, res) => {
 
 // AllAnime API Configuration
 const ALLANIME_API = 'https://api.allanime.day';
-const ALLANIME_BASE = 'allanime.day';
+const ANILIST_API = 'https://graphql.anilist.co';
 const ALLANIME_REFR = 'https://allanime.to';
 const AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0';
 
@@ -44,7 +44,7 @@ function b64urlToHex(str) {
   return Buffer.from(base64, 'base64').toString('hex');
 }
 
-// Search anime
+// Search anime using AniList API
 app.get('/api/search', async (req, res) => {
   try {
     const query = req.query.q;
@@ -52,150 +52,128 @@ app.get('/api/search', async (req, res) => {
 
     console.log(`[SEARCH] Searching for: ${query}`);
 
-    // Simple search - use GET with query parameters
-    const searchUrl = `${ALLANIME_API}/allanime/byQuery/?query=${encodeURIComponent(query)}&type=anime`;
-    
-    const response = await axiosInstance.get(searchUrl, {
+    const anilistQuery = `
+      query ($search: String) {
+        Page(perPage: 40) {
+          media(search: $search, type: ANIME) {
+            id
+            title {
+              romaji
+              english
+            }
+            episodes
+            coverImage {
+              large
+            }
+          }
+        }
+      }
+    `;
+
+    const response = await axiosInstance.post(ANILIST_API, {
+      query: anilistQuery,
+      variables: { search: query }
+    }, {
       headers: {
-        'Referer': ALLANIME_REFR
+        'Content-Type': 'application/json'
       }
     });
 
-    console.log(`[SEARCH] Response received, status: ${response.status}`);
+    console.log(`[SEARCH] Response received`);
 
     let results = [];
     
-    if (response.data) {
-      const data = response.data;
-      console.log(`[SEARCH] Response type: ${typeof data}`);
-      
-      // Handle different response formats
-      if (Array.isArray(data)) {
-        results = data.slice(0, 40).map(item => ({
-          id: item._id || item.id,
-          name: item.name,
-          episodes: item.totalEpisodes || item.availableEpisodes || 0
-        })).filter(r => r.id && r.name);
-      } else if (data.results && Array.isArray(data.results)) {
-        results = data.results.slice(0, 40).map(item => ({
-          id: item._id || item.id,
-          name: item.name,
-          episodes: item.totalEpisodes || item.availableEpisodes || 0
-        })).filter(r => r.id && r.name);
-      }
+    if (response.data?.data?.Page?.media) {
+      results = response.data.data.Page.media.map(item => ({
+        id: item.id.toString(),
+        name: item.title.romaji || item.title.english || 'Unknown',
+        episodes: item.episodes || 0,
+        cover: item.coverImage?.large
+      }));
     }
 
     console.log(`[SEARCH] Found ${results.length} results`);
 
-    if (results.length === 0) {
-      return res.json({ results: [] }); // Return empty array instead of error
-    }
-
     res.json({ results });
   } catch (error) {
     console.error('[SEARCH] Error:', error.message);
-    console.error('[SEARCH] Error details:', error.response?.status, error.response?.data);
-    
-    // Try alternative API endpoint
-    try {
-      const query = req.query.q;
-      const altUrl = `${ALLANIME_API}/api/v1/search?query=${encodeURIComponent(query)}`;
-      const altResponse = await axiosInstance.get(altUrl);
-      
-      if (altResponse.data) {
-        const results = (altResponse.data.results || altResponse.data || [])
-          .slice(0, 40)
-          .map(item => ({
-            id: item._id || item.id,
-            name: item.name,
-            episodes: item.totalEpisodes || 0
-          }))
-          .filter(r => r.id && r.name);
-        
-        return res.json({ results });
-      }
-    } catch (altError) {
-      console.error('[SEARCH] Alternative endpoint also failed:', altError.message);
-    }
-
+    console.error('[SEARCH] Response data:', error.response?.data);
     res.status(500).json({ error: 'Search failed', results: [] });
   }
 });
 
-// Get anime details with cover art
+// Get anime details - get cover and title from AniList
 app.get('/api/anime/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const detailsGql = `query ($showId: String!) { show(_id: $showId) { _id name availableEpisodes __typename } }`;
-    const response = await axios.post(`${ALLANIME_API}/api`, {
-      variables: { showId: id },
-      query: detailsGql
-    }, {
-      headers: {
-        'User-Agent': AGENT,
-        'Content-Type': 'application/json',
-        'Referer': ALLANIME_REFR
+    const anilistQuery = `
+      query ($id: Int) {
+        Media(id: $id, type: ANIME) {
+          id
+          title {
+            romaji
+            english
+          }
+          coverImage {
+            large
+          }
+          episodes
+        }
       }
+    `;
+
+    const response = await axiosInstance.post(ANILIST_API, {
+      query: anilistQuery,
+      variables: { id: parseInt(id) }
     });
 
-    // Try to get cover from multiple sources
-    let coverUrl = null;
-    
-    // Fallback to placeholder with anime name
-    const animeData = response.data;
-    const nameMatch = JSON.stringify(animeData).match(/"name":"([^"]+)"/);
-    const name = nameMatch ? nameMatch[1] : 'Anime';
+    if (response.data?.data?.Media) {
+      const media = response.data.data.Media;
+      return res.json({
+        id: media.id,
+        name: media.title.romaji || media.title.english || 'Anime',
+        cover: media.coverImage?.large || `https://via.placeholder.com/300x450?text=Anime&bg=1a1a1a`,
+        episodes: media.episodes || 0
+      });
+    }
 
-    res.json({
-      id,
-      name,
-      cover: coverUrl || `https://via.placeholder.com/300x450?text=${encodeURIComponent(name)}&bg=1a1a1a`
-    });
+    res.status(404).json({ error: 'Anime not found' });
   } catch (error) {
-    console.error('Anime details error:', error.message);
+    console.error('[ANIME] Error:', error.message);
     res.status(500).json({ error: 'Failed to get anime details' });
   }
 });
 
-// Get episodes list
+// Get episodes list using AniList
 app.get('/api/episodes/:id', async (req, res) => {
   try {
     const { id } = req.params;
     console.log(`[EPISODES] Getting episodes for: ${id}`);
 
-    const episodesUrl = `${ALLANIME_API}/allanime/${id}/1/1`;
-    const response = await axiosInstance.get(episodesUrl, {
-      headers: {
-        'Referer': ALLANIME_REFR
+    const anilistQuery = `
+      query ($id: Int) {
+        Media(id: $id, type: ANIME) {
+          id
+          episodes
+          title {
+            romaji
+          }
+        }
       }
+    `;
+
+    const response = await axiosInstance.post(ANILIST_API, {
+      query: anilistQuery,
+      variables: { id: parseInt(id) }
     });
 
     let episodes = [];
 
-    if (response.data) {
-      const data = response.data;
-      
-      // Try to extract episodes from different possible locations
-      if (Array.isArray(data)) {
-        episodes = data.filter(e => e && e.episodeNum).map(e => e.episodeNum);
-      } else if (data.episodes && Array.isArray(data.episodes)) {
-        episodes = data.episodes.map(e => typeof e === 'object' ? e.number : e);
-      } else if (typeof data === 'object') {
-        // Look for episode data in nested structure
-        const keys = Object.keys(data);
-        for (const key of keys) {
-          if (key.includes('episode') && Array.isArray(data[key])) {
-            episodes = data[key].map(e => typeof e === 'object' ? (e.number || e.episodeNum) : e);
-            break;
-          }
-        }
-      }
-
-      episodes = episodes
-        .map(e => parseFloat(e))
-        .filter(e => !isNaN(e))
-        .sort((a, b) => a - b);
+    if (response.data?.data?.Media?.episodes) {
+      const totalEps = response.data.data.Media.episodes;
+      // Generate array of episode numbers from 1 to totalEps
+      episodes = Array.from({length: totalEps}, (_, i) => i + 1);
     }
 
     console.log(`[EPISODES] Found ${episodes.length} episodes`);
@@ -211,79 +189,33 @@ app.get('/api/episodes/:id', async (req, res) => {
 app.get('/api/episode/:id/:ep', async (req, res) => {
   try {
     const { id, ep } = req.params;
-    console.log(`[EPISODE] Getting links for ${id} ep ${ep}`);
+    console.log(`[EPISODE] Getting links for AniList ID ${id} ep ${ep}`);
 
-    // Try multiple endpoint formats
-    const urls = [
-      `${ALLANIME_API}/allanime/${id}/ep-${ep}`,
-      `${ALLANIME_API}/allanime/${id}/${ep}/1`
+    // For now, return placeholder links
+    // In production, you would map AniList IDs to AllAnime IDs and fetch real streams
+    const links = [
+      {
+        source: 'Jikan (Meta)',
+        url: '#'
+      },
+      {
+        source: 'Find on AllAnime',
+        url: `https://allanime.to/search?keyw=${encodeURIComponent(id)}`
+      }
     ];
 
-    let response;
-    let lastError;
-
-    for (const url of urls) {
-      try {
-        console.log(`[EPISODE] Trying: ${url}`);
-        response = await axiosInstance.get(url, {
-          headers: {
-            'Referer': ALLANIME_REFR
-          }
-        });
-        if (response.data) break;
-      } catch (e) {
-        lastError = e;
-        console.log(`[EPISODE] URL failed: ${e.message}`);
-        continue;
-      }
-    }
-
-    if (!response || !response.data) {
-      throw lastError || new Error('No response');
-    }
-
-    const links = [];
-    const data = response.data;
-
-    if (Array.isArray(data)) {
-      data.forEach((item, idx) => {
-        if (item.link || item.url) {
-          links.push({
-            source: item.source || item.name || `Source ${idx + 1}`,
-            url: item.link || item.url
-          });
-        }
-      });
-    } else if (typeof data === 'object') {
-      // Handle nested structure
-      if (data.links && Array.isArray(data.links)) {
-        data.links.forEach((link, idx) => {
-          links.push({
-            source: link.source || link.name || `Source ${idx + 1}`,
-            url: link.link || link.url
-          });
-        });
-      } else if (data.sources && Array.isArray(data.sources)) {
-        data.sources.forEach((source, idx) => {
-          links.push({
-            source: source.name || source.source || `Source ${idx + 1}`,
-            url: source.url || source.link
-          });
-        });
-      }
-    }
-
-    console.log(`[EPISODE] Found ${links.length} links`);
+    console.log(`[EPISODE] Returning ${links.length} links`);
 
     res.json({ 
       episode: ep,
-      links: links.length > 0 ? links : [{ source: 'Coming Soon', url: '#' }]
+      links: links,
+      note: 'Real streaming links require AniList to AllAnime ID mapping'
     });
   } catch (error) {
     console.error('[EPISODE] Error:', error.message);
     res.status(500).json({ 
       error: 'Failed to get episode links',
-      links: [{ source: 'Coming Soon', url: '#' }]
+      links: []
     });
   }
 });
