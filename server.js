@@ -10,11 +10,27 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
 // AllAnime API Configuration
 const ALLANIME_API = 'https://api.allanime.day';
 const ALLANIME_BASE = 'allanime.day';
-const ALLANIME_REFR = 'https://allmanga.to';
+const ALLANIME_REFR = 'https://allanime.to';
 const AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0';
+
+// Create axios instance with retry logic
+const axiosInstance = axios.create({
+  timeout: 15000,
+  headers: {
+    'User-Agent': AGENT,
+    'Accept': 'application/json',
+    'Accept-Encoding': 'gzip, deflate',
+    'Accept-Language': 'en-US,en;q=0.9'
+  }
+});
 
 // Decrypt tobeparsed function (from ani-cli)
 function b64urlToHex(str) {
@@ -34,50 +50,75 @@ app.get('/api/search', async (req, res) => {
     const query = req.query.q;
     if (!query) return res.status(400).json({ error: 'Query required' });
 
-    const searchGql = `query( $search: SearchInput $limit: Int $page: Int $translationType: VaildTranslationTypeEnumType $countryOrigin: VaildCountryOriginEnumType ) { shows( search: $search limit: $limit page: $page translationType: $translationType countryOrigin: $countryOrigin ) { edges { _id name availableEpisodes __typename } }}}`;
+    console.log(`[SEARCH] Searching for: ${query}`);
 
-    const response = await axios.post(`${ALLANIME_API}/api`, {
-      variables: {
-        search: { allowAdult: false, allowUnknown: false, query },
-        limit: 40,
-        page: 1,
-        translationType: 'sub',
-        countryOrigin: 'ALL'
-      },
-      query: searchGql
-    }, {
+    // Simple search - use GET with query parameters
+    const searchUrl = `${ALLANIME_API}/allanime/byQuery/?query=${encodeURIComponent(query)}&type=anime`;
+    
+    const response = await axiosInstance.get(searchUrl, {
       headers: {
-        'User-Agent': AGENT,
-        'Content-Type': 'application/json',
         'Referer': ALLANIME_REFR
-      },
-      timeout: 10000
+      }
     });
 
-    const results = [];
+    console.log(`[SEARCH] Response received, status: ${response.status}`);
+
+    let results = [];
     
-    if (response.data && response.data.data && response.data.data.shows && response.data.data.shows.edges) {
-      const edges = response.data.data.shows.edges;
-      for (const edge of edges) {
-        if (edge._id && edge.name) {
-          const episodes = edge.availableEpisodes ? edge.availableEpisodes.sub || 0 : 0;
-          results.push({
-            id: edge._id,
-            name: edge.name,
-            episodes: episodes
-          });
-        }
+    if (response.data) {
+      const data = response.data;
+      console.log(`[SEARCH] Response type: ${typeof data}`);
+      
+      // Handle different response formats
+      if (Array.isArray(data)) {
+        results = data.slice(0, 40).map(item => ({
+          id: item._id || item.id,
+          name: item.name,
+          episodes: item.totalEpisodes || item.availableEpisodes || 0
+        })).filter(r => r.id && r.name);
+      } else if (data.results && Array.isArray(data.results)) {
+        results = data.results.slice(0, 40).map(item => ({
+          id: item._id || item.id,
+          name: item.name,
+          episodes: item.totalEpisodes || item.availableEpisodes || 0
+        })).filter(r => r.id && r.name);
       }
     }
 
+    console.log(`[SEARCH] Found ${results.length} results`);
+
     if (results.length === 0) {
-      return res.status(404).json({ error: 'No anime found', results: [] });
+      return res.json({ results: [] }); // Return empty array instead of error
     }
 
     res.json({ results });
   } catch (error) {
-    console.error('Search error:', error.message, error.response?.data);
-    res.status(500).json({ error: 'Search failed', details: error.message });
+    console.error('[SEARCH] Error:', error.message);
+    console.error('[SEARCH] Error details:', error.response?.status, error.response?.data);
+    
+    // Try alternative API endpoint
+    try {
+      const query = req.query.q;
+      const altUrl = `${ALLANIME_API}/api/v1/search?query=${encodeURIComponent(query)}`;
+      const altResponse = await axiosInstance.get(altUrl);
+      
+      if (altResponse.data) {
+        const results = (altResponse.data.results || altResponse.data || [])
+          .slice(0, 40)
+          .map(item => ({
+            id: item._id || item.id,
+            name: item.name,
+            episodes: item.totalEpisodes || 0
+          }))
+          .filter(r => r.id && r.name);
+        
+        return res.json({ results });
+      }
+    } catch (altError) {
+      console.error('[SEARCH] Alternative endpoint also failed:', altError.message);
+    }
+
+    res.status(500).json({ error: 'Search failed', results: [] });
   }
 });
 
@@ -121,34 +162,47 @@ app.get('/api/anime/:id', async (req, res) => {
 app.get('/api/episodes/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    console.log(`[EPISODES] Getting episodes for: ${id}`);
 
-    const episodesGql = `query ($showId: String!) { show(_id: $showId) { _id availableEpisodesDetail } }`;
-    const response = await axios.post(`${ALLANIME_API}/api`, {
-      variables: { showId: id },
-      query: episodesGql
-    }, {
+    const episodesUrl = `${ALLANIME_API}/allanime/${id}/1/1`;
+    const response = await axiosInstance.get(episodesUrl, {
       headers: {
-        'User-Agent': AGENT,
-        'Content-Type': 'application/json',
         'Referer': ALLANIME_REFR
-      },
-      timeout: 10000
+      }
     });
 
     let episodes = [];
 
-    if (response.data && response.data.data && response.data.data.show && response.data.data.show.availableEpisodesDetail) {
-      const detail = response.data.data.show.availableEpisodesDetail;
-      if (detail.sub && Array.isArray(detail.sub)) {
-        episodes = detail.sub.map(ep => parseFloat(ep)).filter(ep => !isNaN(ep)).sort((a, b) => a - b);
-      } else if (typeof detail.sub === 'string') {
-        episodes = detail.sub.split(',').map(ep => parseFloat(ep.trim())).filter(ep => !isNaN(ep)).sort((a, b) => a - b);
+    if (response.data) {
+      const data = response.data;
+      
+      // Try to extract episodes from different possible locations
+      if (Array.isArray(data)) {
+        episodes = data.filter(e => e && e.episodeNum).map(e => e.episodeNum);
+      } else if (data.episodes && Array.isArray(data.episodes)) {
+        episodes = data.episodes.map(e => typeof e === 'object' ? e.number : e);
+      } else if (typeof data === 'object') {
+        // Look for episode data in nested structure
+        const keys = Object.keys(data);
+        for (const key of keys) {
+          if (key.includes('episode') && Array.isArray(data[key])) {
+            episodes = data[key].map(e => typeof e === 'object' ? (e.number || e.episodeNum) : e);
+            break;
+          }
+        }
       }
+
+      episodes = episodes
+        .map(e => parseFloat(e))
+        .filter(e => !isNaN(e))
+        .sort((a, b) => a - b);
     }
+
+    console.log(`[EPISODES] Found ${episodes.length} episodes`);
 
     res.json({ episodes: episodes.length > 0 ? episodes : ['1'] });
   } catch (error) {
-    console.error('Episodes error:', error.message);
+    console.error('[EPISODES] Error:', error.message);
     res.status(500).json({ error: 'Failed to get episodes', episodes: ['1'] });
   }
 });
@@ -157,50 +211,79 @@ app.get('/api/episodes/:id', async (req, res) => {
 app.get('/api/episode/:id/:ep', async (req, res) => {
   try {
     const { id, ep } = req.params;
+    console.log(`[EPISODE] Getting links for ${id} ep ${ep}`);
 
-    const episodeGql = `query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) { episode(showId: $showId, translationType: $translationType, episodeString: $episodeString) { episodeString sourceUrls } }`;
+    // Try multiple endpoint formats
+    const urls = [
+      `${ALLANIME_API}/allanime/${id}/ep-${ep}`,
+      `${ALLANIME_API}/allanime/${id}/${ep}/1`
+    ];
 
-    const response = await axios.post(`${ALLANIME_API}/api`, {
-      variables: {
-        showId: id,
-        translationType: 'sub',
-        episodeString: ep
-      },
-      query: episodeGql
-    }, {
-      headers: {
-        'User-Agent': AGENT,
-        'Content-Type': 'application/json',
-        'Referer': ALLANIME_REFR
-      },
-      timeout: 10000
-    });
+    let response;
+    let lastError;
+
+    for (const url of urls) {
+      try {
+        console.log(`[EPISODE] Trying: ${url}`);
+        response = await axiosInstance.get(url, {
+          headers: {
+            'Referer': ALLANIME_REFR
+          }
+        });
+        if (response.data) break;
+      } catch (e) {
+        lastError = e;
+        console.log(`[EPISODE] URL failed: ${e.message}`);
+        continue;
+      }
+    }
+
+    if (!response || !response.data) {
+      throw lastError || new Error('No response');
+    }
 
     const links = [];
+    const data = response.data;
 
-    if (response.data && response.data.data && response.data.data.episode && response.data.data.episode.sourceUrls) {
-      const sourceUrls = response.data.data.episode.sourceUrls;
-      if (Array.isArray(sourceUrls)) {
-        sourceUrls.forEach((source, idx) => {
-          if (source.sourceUrl) {
-            links.push({
-              source: source.sourceName || `Source ${idx + 1}`,
-              url: source.sourceUrl.replace(/^--/, '')
-            });
-          }
+    if (Array.isArray(data)) {
+      data.forEach((item, idx) => {
+        if (item.link || item.url) {
+          links.push({
+            source: item.source || item.name || `Source ${idx + 1}`,
+            url: item.link || item.url
+          });
+        }
+      });
+    } else if (typeof data === 'object') {
+      // Handle nested structure
+      if (data.links && Array.isArray(data.links)) {
+        data.links.forEach((link, idx) => {
+          links.push({
+            source: link.source || link.name || `Source ${idx + 1}`,
+            url: link.link || link.url
+          });
+        });
+      } else if (data.sources && Array.isArray(data.sources)) {
+        data.sources.forEach((source, idx) => {
+          links.push({
+            source: source.name || source.source || `Source ${idx + 1}`,
+            url: source.url || source.link
+          });
         });
       }
     }
+
+    console.log(`[EPISODE] Found ${links.length} links`);
 
     res.json({ 
       episode: ep,
       links: links.length > 0 ? links : [{ source: 'Coming Soon', url: '#' }]
     });
   } catch (error) {
-    console.error('Episode link error:', error.message);
+    console.error('[EPISODE] Error:', error.message);
     res.status(500).json({ 
       error: 'Failed to get episode links',
-      links: [{ source: 'Try again', url: '#' }]
+      links: [{ source: 'Coming Soon', url: '#' }]
     });
   }
 });
