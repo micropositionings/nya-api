@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NYA - Streaming</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%23ff4466' width='100' height='100'/><text x='50' y='70' font-size='60' font-weight='bold' fill='white' text-anchor='middle'>A</text></svg>" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    html, body {
+      width: 100%;
+      height: 100%;
+      color-scheme: dark;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+    }
+    
+    body {
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+    
+    .header {
+      background: #111;
+      padding: 16px 20px;
+      border-bottom: 1px solid #222;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    
+    .header-content {
+      max-width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+    
+    .logo {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      white-space: nowrap;
+    }
+    
+    .logo-a {
+      color: #ff4466;
+    }
+    
+    .nav-tabs {
+      display: flex;
+      gap: 4px;
+      overflow-x: auto;
+      padding: 0 4px;
+    }
+    
+    .nav-tabs::-webkit-scrollbar {
+      height: 4px;
+    }
+    
+    .nav-tabs::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    
+    .nav-tabs::-webkit-scrollbar-thumb {
+      background: #333;
+      border-radius: 2px;
+    }
+    
+    .nav-tab {
+      padding: 8px 18px;
+      background: transparent;
+      border: 1px solid transparent;
+      color: #999;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      text-transform: capitalize;
+      transition: all 0.2s;
+      white-space: nowrap;
+      border-radius: 3px;
+    }
+    
+    .nav-tab:hover {
+      color: #ddd;
+      background: #1a1a1a;
+    }
+    
+    .nav-tab.active {
+      color: #fff;
+      background: #1a1a1a;
+      border-color: #ff4466;
+    }
+    
+    .main-content {
+      flex: 1;
+      overflow-y: auto;
+      background: #0a0a0a;
+    }
+    
+    .main-content::-webkit-scrollbar {
+      width: 10px;
+    }
+    
+    .main-content::-webkit-scrollbar-track {
+      background: #0a0a0a;
+    }
+    
+    .main-content::-webkit-scrollbar-thumb {
+      background: #333;
+      border-radius: 4px;
+    }
+    
+    .main-content::-webkit-scrollbar-thumb:hover {
+      background: #444;
+    }
+    
+    .hero {
+      height: 320px;
+      background: linear-gradient(135deg, #1a1a1a 0%, #0f0f0f 100%);
+      display: flex;
+      align-items: flex-end;
+      padding: 48px 40px;
+      margin-bottom: 40px;
+      border-bottom: 1px solid #1a1a1a;
+      position: relative;
+    }
+    
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: -200px;
+      width: 600px;
+      height: 100%;
+      background: radial-gradient(circle, rgba(255,68,102,0.1), transparent);
+      pointer-events: none;
+    }
+    
+    .hero-content {
+      position: relative;
+      z-index: 2;
+    }
+    
+    .hero-tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #ff4466;
+      margin-bottom: 12px;
+      opacity: 0.9;
+    }
+    
+    .hero-title {
+      font-size: 44px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      line-height: 1.1;
+    }
+    
+    .hero-desc {
+      font-size: 15px;
+      color: #999;
+      max-width: 500px;
+      line-height: 1.5;
+    }
+    
+    .section {
+      padding: 0 40px 48px;
+    }
+    
+    .section-title {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      letter-spacing: -0.3px;
+    }
+    
+    .cards-grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    }
+    
+    .card {
+      position: relative;
+      border-radius: 4px;
+      overflow: hidden;
+      cursor: pointer;
+      aspect-ratio: 2/3;
+      background: #1a1a1a;
+      border: 1px solid #222;
+      transition: all 0.2s;
+      group: 1;
+    }
+    
+    .card:hover {
+      transform: translateY(-6px);
+      border-color: #ff4466;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6), 0 0 24px rgba(255,68,102,0.1);
+    }
+    
+    .card-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: filter 0.25s;
+    }
+    
+    .card:hover .card-image {
+      filter: brightness(1.15) saturate(1.1);
+    }
+    
+    .card-info {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(to top, rgba(0,0,0,0.95), transparent);
+      padding: 20px 12px 12px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    
+    .card:hover .card-info {
+      opacity: 1;
+    }
+    
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.3;
+      margin-bottom: 4px;
+    }
+    
+    .card-meta {
+      font-size: 11px;
+      color: #666;
+    }
+    
+    .placeholder {
+      padding: 60px 20px;
+      text-align: center;
+      color: #555;
+      font-size: 14px;
+      grid-column: 1 / -1;
+    }
+
+    /* Aniwatch Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      width: 100%;
+      max-width: 800px;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      gap: 16px;
+    }
+
+    .modal-header h2 {
+      font-size: 24px;
+      margin: 0;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: #999;
+      font-size: 28px;
+      cursor: pointer;
+      padding: 0;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-close:hover {
+      color: #fff;
+    }
+
+    .search-box {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+
+    .search-input {
+      flex: 1;
+      background: #0a0a0a;
+      border: 1px solid #333;
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: #ff4466;
+    }
+
+    .search-btn {
+      background: #ff4466;
+      border: none;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .search-btn:hover {
+      background: #ff2d4f;
+    }
+
+    .search-results {
+      max-height: 400px;
+      overflow-y: auto;
+      margin-bottom: 24px;
+    }
+
+    .result-item {
+      background: #0a0a0a;
+      border: 1px solid #222;
+      padding: 12px;
+      margin-bottom: 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .result-item:hover {
+      border-color: #ff4466;
+      background: #111;
+    }
+
+    .result-item-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .result-item-meta {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .anime-detail {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .anime-poster {
+      width: 100%;
+      aspect-ratio: 2/3;
+      object-fit: cover;
+      border-radius: 4px;
+      border: 1px solid #333;
+    }
+
+    .anime-info h3 {
+      font-size: 20px;
+      margin-bottom: 12px;
+    }
+
+    .anime-info-meta {
+      font-size: 13px;
+      color: #999;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+
+    .episode-selector {
+      margin-top: 16px;
+    }
+
+    .episode-selector label {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .episode-select {
+      width: 100%;
+      background: #0a0a0a;
+      border: 1px solid #333;
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .episode-select:focus {
+      outline: none;
+      border-color: #ff4466;
+    }
+
+    .stream-sources {
+      margin-top: 16px;
+    }
+
+    .stream-sources label {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .source-link {
+      display: block;
+      background: #0a0a0a;
+      border: 1px solid #222;
+      padding: 12px;
+      margin-bottom: 8px;
+      border-radius: 4px;
+      color: #ff4466;
+      text-decoration: none;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+
+    .source-link:hover {
+      border-color: #ff4466;
+      background: #111;
+    }
+
+    .loading {
+      text-align: center;
+      color: #666;
+      padding: 20px;
+    }
+
+    .error {
+      background: rgba(255, 68, 102, 0.1);
+      border: 1px solid #ff4466;
+      color: #ff8899;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+    
+    @media (max-width: 1200px) {
+      .section {
+        padding: 0 24px 40px;
+      }
+      
+      .hero {
+        padding: 36px 24px;
+      }
+      
+      .hero-title {
+        font-size: 36px;
+      }
+      
+      .cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      }
+    }
+    
+    @media (max-width: 768px) {
+      .header-content {
+        gap: 12px;
+      }
+      
+      .logo {
+        font-size: 22px;
+      }
+      
+      .nav-tabs {
+        gap: 2px;
+      }
+      
+      .nav-tab {
+        padding: 6px 14px;
+        font-size: 12px;
+      }
+      
+      .hero {
+        height: 240px;
+        padding: 24px 16px;
+        margin-bottom: 32px;
+      }
+      
+      .hero-title {
+        font-size: 28px;
+      }
+      
+      .hero-desc {
+        font-size: 14px;
+      }
+      
+      .section {
+        padding: 0 16px 32px;
+      }
+      
+      .section-title {
+        font-size: 18px;
+        margin-bottom: 16px;
+      }
+      
+      .cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 12px;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .header-content {
+        gap: 8px;
+      }
+      
+      .logo {
+        font-size: 20px;
+      }
+      
+      .nav-tab {
+        padding: 6px 12px;
+        font-size: 11px;
+      }
+      
+      .hero {
+        height: 180px;
+        padding: 20px 12px;
+        margin-bottom: 24px;
+      }
+      
+      .hero-title {
+        font-size: 22px;
+      }
+      
+      .hero-desc {
+        font-size: 13px;
+      }
+      
+      .section {
+        padding: 0 12px 24px;
+      }
+      
+      .cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        gap: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-content">
+      <div class="logo">ny<span class="logo-a">a</span></div>
+      <nav class="nav-tabs">
+        <button class="nav-tab active" data-category="movies">movies</button>
+        <button class="nav-tab" data-category="animes">anime</button>
+        <button class="nav-tab" data-category="aniwatch">aniwatch</button>
+        <button class="nav-tab" data-category="tv">tv</button>
+        <button class="nav-tab" data-category="games">games</button>
+        <button class="nav-tab" data-category="proxies">proxies</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <div class="hero" id="heroSection">
+      <div class="hero-content">
+        <div class="hero-tag" id="heroTag">Featured</div>
+        <h1 class="hero-title" id="heroTitle">NYA</h1>
+        <p class="hero-desc" id="heroDesc">Explore thousands of titles across movies, anime, games and more.</p>
+      </div>
+    </div>
+
+    <section class="section">
+      <h2 class="section-title" id="sectionTitle">Movies</h2>
+      <div class="cards-grid" id="contentGrid"></div>
+    </section>
+  </main>
+
+  <!-- Aniwatch Modal -->
+  <div class="modal" id="aniwatchModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Aniwatch - Anime Search</h2>
+        <button class="modal-close" onclick="closeAniwatchModal()">✕</button>
+      </div>
+
+      <div class="search-box">
+        <input 
+          type="text" 
+          class="search-input" 
+          id="animeSearchInput" 
+          placeholder="Search anime (e.g., Naruto, Death Note)..."
+          onkeypress="if(event.key==='Enter') searchAnime()"
+        />
+        <button class="search-btn" onclick="searchAnime()">Search</button>
+      </div>
+
+      <div id="aniwatchContent"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:3000'; // Update this when deployed
+
+    const categoryInfo = {
+      movies: { title: 'Movies', tag: 'Cinema' },
+      animes: { title: 'Anime', tag: 'Animation' },
+      aniwatch: { title: 'Aniwatch', tag: 'Search' },
+      tv: { title: 'TV', tag: 'Series' },
+      games: { title: 'Games', tag: 'Gaming' },
+      proxies: { title: 'Proxies', tag: 'Network' }
+    };
+
+    let currentCategory = 'movies';
+    let currentAnime = null;
+    let currentEpisodes = [];
+
+    // Aniwatch Functions
+    function openAniwatchModal() {
+      document.getElementById('aniwatchModal').classList.add('active');
+      document.getElementById('animeSearchInput').focus();
+    }
+
+    function closeAniwatchModal() {
+      document.getElementById('aniwatchModal').classList.remove('active');
+      document.getElementById('aniwatchContent').innerHTML = '';
+      currentAnime = null;
+    }
+
+    async function searchAnime() {
+      const query = document.getElementById('animeSearchInput').value.trim();
+      if (!query) return;
+
+      const content = document.getElementById('aniwatchContent');
+      content.innerHTML = '<div class="loading">Searching anime...</div>';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}`);
+        const data = await response.json();
+
+        if (!data.results || data.results.length === 0) {
+          content.innerHTML = '<div class="error">No anime found. Try a different search.</div>';
+          return;
+        }
+
+        let html = '<div class="search-results">';
+        data.results.forEach((anime, idx) => {
+          html += `
+            <div class="result-item" onclick="selectAnime('${anime.id}', '${anime.name.replace(/'/g, "\\'")}', ${anime.episodes})">
+              <div class="result-item-title">${anime.name}</div>
+              <div class="result-item-meta">${anime.episodes} episodes</div>
+            </div>
+          `;
+        });
+        html += '</div>';
+        content.innerHTML = html;
+      } catch (err) {
+        content.innerHTML = `<div class="error">Error: ${err.message}</div>`;
+      }
+    }
+
+    async function selectAnime(id, name, episodeCount) {
+      currentAnime = { id, name, episodeCount };
+      const content = document.getElementById('aniwatchContent');
+      content.innerHTML = '<div class="loading">Loading episodes...</div>';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/episodes/${id}`);
+        const data = await response.json();
+        currentEpisodes = data.episodes;
+
+        let html = `
+          <div class="anime-detail">
+            <img class="anime-poster" src="https://via.placeholder.com/200x300?text=${encodeURIComponent(name)}&bg=1a1a1a" alt="${name}" />
+            <div class="anime-info">
+              <h3>${name}</h3>
+              <div class="anime-info-meta">
+                <div><strong>Episodes:</strong> ${episodeCount}</div>
+                <div style="margin-top: 12px; color: #999; font-size: 12px;">Select an episode to view streaming sources.</div>
+              </div>
+              
+              <div class="episode-selector">
+                <label for="episodeSelect">Select Episode</label>
+                <select class="episode-select" id="episodeSelect" onchange="getEpisodeLinks()">
+                  <option value="">-- Choose Episode --</option>
+        `;
+
+        currentEpisodes.forEach(ep => {
+          html += `<option value="${ep}">Episode ${ep}</option>`;
+        });
+
+        html += `
+                </select>
+              </div>
+
+              <div class="stream-sources" id="streamSources" style="display:none;">
+                <label>Streaming Sources</label>
+                <div id="sourcesList"></div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        content.innerHTML = html;
+      } catch (err) {
+        content.innerHTML = `<div class="error">Error loading episodes: ${err.message}</div>`;
+      }
+    }
+
+    async function getEpisodeLinks() {
+      const ep = document.getElementById('episodeSelect').value;
+      if (!ep || !currentAnime) return;
+
+      const sourcesList = document.getElementById('sourcesList');
+      sourcesList.innerHTML = '<div class="loading">Loading sources...</div>';
+      document.getElementById('streamSources').style.display = 'block';
+
+      try {
+        const response = await fetch(`${API_BASE}/api/episode/${currentAnime.id}/${ep}`);
+        const data = await response.json();
+
+        let html = '';
+        if (data.links && data.links.length > 0) {
+          data.links.forEach((link, idx) => {
+            html += `
+              <a class="source-link" href="${link.url}" target="_blank" rel="noopener">
+                ${link.source} → Open
+              </a>
+            `;
+          });
+        } else {
+          html = '<div class="error">No streaming sources available for this episode.</div>';
+        }
+        sourcesList.innerHTML = html;
+      } catch (err) {
+        sourcesList.innerHTML = `<div class="error">Error: ${err.message}</div>`;
+      }
+    }
+
+    // Close modal when clicking outside
+    document.addEventListener('click', (e) => {
+      const modal = document.getElementById('aniwatchModal');
+      if (e.target === modal) closeAniwatchModal();
+    });
+
+    // Original Functions
+    async function loadFromFile(category) {
+      try {
+        const filename = `${category}.txt`;
+        const response = await fetch(filename);
+        
+        if (!response.ok) {
+          console.warn(`Could not load ${filename}`);
+          return [];
+        }
+        
+        const text = await response.text();
+        return parseItems(text);
+      } catch (err) {
+        console.error(`Error: ${err.message}`);
+        return [];
+      }
+    }
+
+    function parseItems(text) {
+      if (!text || typeof text !== 'string') return [];
+      
+      const items = [];
+      const lines = text.split('\n');
+      
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        
+        const parts = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let i = 0; i < trimmed.length; i++) {
+          const char = trimmed[i];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            parts.push(current.trim().replace(/^"|"$/g, ''));
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        parts.push(current.trim().replace(/^"|"$/g, ''));
+        
+        if (parts.length < 4) continue;
+        
+        const [id, title, image, link] = parts;
+        if (title && image && link) {
+          items.push({ title, image, link });
+        }
+      }
+      
+      return items;
+    }
+
+    function updateHero(items) {
+      const item = items && items.length > 0 ? items[0] : null;
+      
+      if (item) {
+        document.getElementById('heroTitle').textContent = item.title;
+        document.getElementById('heroTag').textContent = categoryInfo[currentCategory].tag.toUpperCase();
+        const domain = item.link.split('/')[2] || 'explore';
+        document.getElementById('heroDesc').textContent = `Check out this featured ${categoryInfo[currentCategory].title.toLowerCase()}`;
+      }
+    }
+
+    function renderItems(items) {
+      const grid = document.getElementById('contentGrid');
+      grid.innerHTML = '';
+      
+      if (!items.length) {
+        grid.innerHTML = '<div class="placeholder">No content available</div>';
+        return;
+      }
+      
+      items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = `
+          <img class="card-image" src="${item.image}" alt="${item.title}" onerror="this.src='https://via.placeholder.com/160x240?text=${encodeURIComponent(item.title)}&bg=1a1a1a'" />
+          <div class="card-info">
+            <div class="card-title">${item.title}</div>
+            <div class="card-meta">tap to open</div>
+          </div>
+        `;
+        card.addEventListener('click', () => {
+          window.open(item.link, '_blank');
+        });
+        grid.appendChild(card);
+      });
+    }
+
+    async function switchCategory(category) {
+      currentCategory = category;
+      
+      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+      document.querySelector(`[data-category="${category}"]`).classList.add('active');
+      
+      const info = categoryInfo[category];
+      document.getElementById('sectionTitle').textContent = info.title;
+
+      if (category === 'aniwatch') {
+        openAniwatchModal();
+        document.getElementById('contentGrid').innerHTML = '';
+      } else {
+        closeAniwatchModal();
+        const items = await loadFromFile(category);
+        updateHero(items);
+        renderItems(items);
+      }
+    }
+
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+      tab.addEventListener('click', () => switchCategory(tab.dataset.category));
+    });
+
+    switchCategory('movies');
+  </script>
+</body>
+</html>
