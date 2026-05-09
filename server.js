@@ -50,28 +50,34 @@ app.get('/api/search', async (req, res) => {
         'User-Agent': AGENT,
         'Content-Type': 'application/json',
         'Referer': ALLANIME_REFR
-      }
+      },
+      timeout: 10000
     });
 
     const results = [];
-    const data = JSON.stringify(response.data);
-    const shows = data.split('Show');
     
-    for (let i = 1; i < shows.length && results.length < 40; i++) {
-      const match = shows[i].match(/"_id":"([^"]+)","name":"([^"]+)".*?"sub":(\d+)/);
-      if (match) {
-        results.push({
-          id: match[1],
-          name: match[2].replace(/\\"/g, '"'),
-          episodes: parseInt(match[3])
-        });
+    if (response.data && response.data.data && response.data.data.shows && response.data.data.shows.edges) {
+      const edges = response.data.data.shows.edges;
+      for (const edge of edges) {
+        if (edge._id && edge.name) {
+          const episodes = edge.availableEpisodes ? edge.availableEpisodes.sub || 0 : 0;
+          results.push({
+            id: edge._id,
+            name: edge.name,
+            episodes: episodes
+          });
+        }
       }
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'No anime found', results: [] });
     }
 
     res.json({ results });
   } catch (error) {
-    console.error('Search error:', error.message);
-    res.status(500).json({ error: 'Search failed' });
+    console.error('Search error:', error.message, error.response?.data);
+    res.status(500).json({ error: 'Search failed', details: error.message });
   }
 });
 
@@ -125,18 +131,19 @@ app.get('/api/episodes/:id', async (req, res) => {
         'User-Agent': AGENT,
         'Content-Type': 'application/json',
         'Referer': ALLANIME_REFR
-      }
+      },
+      timeout: 10000
     });
 
-    const data = JSON.stringify(response.data);
-    const match = data.match(/"sub":\[([^\]]+)\]/);
     let episodes = [];
 
-    if (match) {
-      episodes = match[1].split(',').map(ep => {
-        const num = ep.replace(/["\s]/g, '');
-        return num ? parseFloat(num) : null;
-      }).filter(ep => ep !== null).sort((a, b) => a - b);
+    if (response.data && response.data.data && response.data.data.show && response.data.data.show.availableEpisodesDetail) {
+      const detail = response.data.data.show.availableEpisodesDetail;
+      if (detail.sub && Array.isArray(detail.sub)) {
+        episodes = detail.sub.map(ep => parseFloat(ep)).filter(ep => !isNaN(ep)).sort((a, b) => a - b);
+      } else if (typeof detail.sub === 'string') {
+        episodes = detail.sub.split(',').map(ep => parseFloat(ep.trim())).filter(ep => !isNaN(ep)).sort((a, b) => a - b);
+      }
     }
 
     res.json({ episodes: episodes.length > 0 ? episodes : ['1'] });
@@ -165,34 +172,36 @@ app.get('/api/episode/:id/:ep', async (req, res) => {
         'User-Agent': AGENT,
         'Content-Type': 'application/json',
         'Referer': ALLANIME_REFR
-      }
+      },
+      timeout: 10000
     });
 
-    const data = response.data;
     const links = [];
 
-    // Parse source URLs from response
-    const responseStr = JSON.stringify(data);
-    const sourceMatches = responseStr.match(/"sourceName":"([^"]+)"[^}]*"sourceUrl":"--([^"]+)"/g) || [];
-    
-    sourceMatches.forEach(match => {
-      const nameMatch = match.match(/"sourceName":"([^"]+)"/);
-      const urlMatch = match.match(/"sourceUrl":"--([^"]+)"/);
-      if (nameMatch && urlMatch) {
-        links.push({
-          source: nameMatch[1],
-          url: decodeURIComponent(urlMatch[1])
+    if (response.data && response.data.data && response.data.data.episode && response.data.data.episode.sourceUrls) {
+      const sourceUrls = response.data.data.episode.sourceUrls;
+      if (Array.isArray(sourceUrls)) {
+        sourceUrls.forEach((source, idx) => {
+          if (source.sourceUrl) {
+            links.push({
+              source: source.sourceName || `Source ${idx + 1}`,
+              url: source.sourceUrl.replace(/^--/, '')
+            });
+          }
         });
       }
-    });
+    }
 
     res.json({ 
       episode: ep,
-      links: links.length > 0 ? links : [{ source: 'Default', url: '#' }]
+      links: links.length > 0 ? links : [{ source: 'Coming Soon', url: '#' }]
     });
   } catch (error) {
     console.error('Episode link error:', error.message);
-    res.status(500).json({ error: 'Failed to get episode links' });
+    res.status(500).json({ 
+      error: 'Failed to get episode links',
+      links: [{ source: 'Try again', url: '#' }]
+    });
   }
 });
 
